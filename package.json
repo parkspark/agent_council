@@ -1,0 +1,19 @@
+{
+  "name": "agent-council",
+  "version": "0.1.0",
+  "description": "Claude Code · Codex · Antigravity CLI가 토론·합의한 뒤 작업을 수행하는 멀티 에이전트 오케스트레이터",
+  "type": "module",
+  "bin": {
+    "council": "bin/council.js"
+  },
+  "scripts": {
+    "ui": "node bin/council.js ui",
+    "demo": "node bin/council.js ui --mock",
+    "doctor": "node bin/council.js doctor",
+    "test": "node --test test/council.test.js"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "Apache-2.0"
+}

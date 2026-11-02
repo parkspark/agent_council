@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Council</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <header class="brand">
+        <span class="brand-mark" id="brandMark" aria-hidden="true"></span>
+        <h1>Agent Council</h1>
+        <span class="mock-badge" id="mockBadge" hidden>연습 모드</span>
+      </header>
+
+      <form id="runForm" novalidate>
+        <label class="field-label" for="task">요청</label>
+        <textarea id="task" rows="6" placeholder="예: 로그인 API에 입력값 검증을 추가해 줘" spellcheck="false"></textarea>
+
+        <label class="field-label" for="cwd">작업 폴더</label>
+        <input id="cwd" type="text" placeholder="C:\Users\...\프로젝트" spellcheck="false" autocomplete="off">
+
+        <fieldset class="seg" id="modeSeg">
+          <legend class="field-label">진행 방식</legend>
+          <label><input type="radio" name="mode" value="lead" checked><span>한 명이 구현</span></label>
+          <label><input type="radio" name="mode" value="compete"><span>셋이 경쟁</span></label>
+          <label><input type="radio" name="mode" value="discuss"><span>토론만</span></label>
+        </fieldset>
+        <p class="hint" id="modeHint"></p>
+
+        <div class="inline-field">
+          <label class="field-label" for="rounds">토론 라운드</label>
+          <input id="rounds" type="number" min="0" max="5" step="1" value="2">
+        </div>
+
+        <fieldset class="agent-pick" id="agentPick">
+          <legend class="field-label">참여 에이전트</legend>
+        </fieldset>
+
+        <label class="check"><input type="checkbox" id="autoApprove"><span>승인 없이 바로 실행</span></label>
+
+        <div class="form-actions">
+          <button type="submit" class="primary" id="startBtn">회의 시작</button>
+          <button type="button" class="secondary" id="cancelBtn" hidden>회의 중단</button>
+        </div>
+        <p class="form-error" id="formError" role="alert"></p>
+      </form>
+
+      <section class="history">
+        <h2>지난 회의</h2>
+        <ol id="historyList"></ol>
+      </section>
+    </aside>
+
+    <main class="main">
+      <div class="conn" id="connBar" hidden>서버와 연결이 끊겼습니다. 다시 연결하는 중입니다.</div>
+      <div class="replay" id="replayBar" hidden>
+        <span>지난 회의를 다시 보는 중입니다.</span>
+        <button type="button" class="link" id="backLive">진행 중인 회의로 돌아가기</button>
+      </div>
+      <nav class="rail" id="rail" aria-label="진행 단계"></nav>
+      <section class="seats" id="seats" aria-label="에이전트"></section>
+      <section class="motion" id="motion" aria-live="polite"></section>
+    </main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "debateRounds": 2,
+  "moderator": "claude",
+  "executor": "auto",
+  "executionMode": "lead",
+  "permission": "edits",
+  "consensusRetries": 1,
+  "maxFixRounds": 1,
+  "timeouts": { "discussMinutes": 15, "executeMinutes": 40 },
+  "maxOpinionChars": 8000,
+  "maxDiffChars": 40000,
+  "port": 4545,
+  "defaultCwd": null,
+  "agents": {
+    "claude":      { "enabled": true, "command": "claude", "model": null, "extraArgs": [] },
+    "codex":       { "enabled": true, "command": "codex",  "model": null, "extraArgs": [] },
+    "antigravity": { "enabled": true, "command": "agy",    "model": null, "extraArgs": [] }
+  }
+}
