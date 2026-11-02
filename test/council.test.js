@@ -8,6 +8,7 @@ import { extractJson, normStance, normVote, normVerdict, stripTrailingJson } fro
 import { ADAPTERS, normalizeAgentId } from '../src/agents/index.js';
 import { loadConfig } from '../src/config.js';
 import { Council, ROOT } from '../src/orchestrator.js';
+import { windowsInstallDirs, findInInstallDirs } from '../src/process.js';
 
 test('답변 끝의 JSON 블록을 읽는다', () => {
   const t = '### 의견\n좋습니다.\n\n```json\n{"stance": "agree", "summary": "ok"}\n```';
@@ -93,6 +94,22 @@ test('실제 agy 1.4.12의 권한 거부 출력을 오류로 인식한다', () =
   const r = p.result();
   assert.equal(r.text, '');
   assert.ok(ADAPTERS.antigravity.isPermissionError(r.error));
+});
+
+test('PATH에 없어도 기본 설치 위치에서 CLI를 찾는다', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'council-home-'));
+  try {
+    const local = path.join(home, 'AppData', 'Local');
+    const bin = path.join(local, 'agy', 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'agy.exe'), '');
+    const dirs = windowsInstallDirs({ USERPROFILE: home, LOCALAPPDATA: local });
+    assert.deepEqual(findInInstallDirs('agy', dirs), [path.join(bin, 'agy.exe')]);
+    assert.deepEqual(findInInstallDirs('codex', dirs), []);
+    assert.deepEqual(findInInstallDirs('..\\agy', dirs), []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('가짜 에이전트로 전체 흐름(lead)이 끝까지 돈다', async () => {

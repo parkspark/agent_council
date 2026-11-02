@@ -47,6 +47,37 @@ async function findOnPathWindows(cmd) {
   return r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 }
 
+// PATH에서 못 찾았을 때 직접 확인할 CLI 기본 설치 폴더.
+// 설치 스크립트가 PATH를 바꿔도 이미 열려 있던 터미널·VS Code·탐색기는 예전 PATH를 그대로 쓰기 때문에
+// `where`가 실패할 수 있습니다. 그럴 때도 실행 파일이 기본 위치에 있으면 그대로 씁니다.
+export function windowsInstallDirs(env = process.env) {
+  const home = env.USERPROFILE || '';
+  const local = env.LOCALAPPDATA || (home && path.join(home, 'AppData', 'Local'));
+  const roaming = env.APPDATA || (home && path.join(home, 'AppData', 'Roaming'));
+  return [
+    local && path.join(local, 'agy', 'bin'), // Antigravity (install.ps1)
+    home && path.join(home, '.local', 'bin'), // Claude Code (install.ps1)
+    local && path.join(local, 'Programs', 'OpenAI', 'Codex', 'bin'), // Codex 설치 프로그램
+    roaming && path.join(roaming, 'npm'), // npm install -g
+  ].filter(Boolean);
+}
+
+/** 명령 이름(경로 없이)을 기본 설치 폴더에서 찾습니다. */
+export function findInInstallDirs(cmd, dirs = windowsInstallDirs()) {
+  if (!cmd || /[\\/]/.test(cmd)) return [];
+  const exts = path.extname(cmd) ? [''] : ['.exe', '.cmd', '.bat', '.com'];
+  const hits = [];
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const p = path.join(dir, cmd + ext);
+      try {
+        if (fs.statSync(p).isFile()) hits.push(p);
+      } catch { /* 이 위치에는 없음 */ }
+    }
+  }
+  return hits;
+}
+
 // npm이 만든 .cmd shim 안에서 실제 JS 진입점 경로를 찾아냅니다.
 //   예) "%dp0%\node_modules\@openai\codex\bin\codex.js" %*
 function parseNpmShim(cmdPath) {
@@ -68,13 +99,18 @@ function parseNpmShim(cmdPath) {
 export async function resolveCommand(cmd) {
   if (cache.has(cmd)) return cache.get(cmd);
   let r;
+  let outsidePath = false;
   if (!IS_WIN) {
     const p = findOnPathPosix(cmd);
     r = p
       ? { found: true, path: p, file: p, prefixArgs: [], shell: false, how: 'direct' }
       : { found: false, path: null, file: cmd, prefixArgs: [], shell: false, how: 'missing' };
   } else {
-    const hits = await findOnPathWindows(cmd);
+    let hits = await findOnPathWindows(cmd);
+    if (!hits.length) {
+      hits = findInInstallDirs(cmd);
+      outsidePath = hits.length > 0;
+    }
     const hit = hits.find((h) => /\.(exe|com|cmd|bat)$/i.test(h)) || hits[0];
     if (!hit) {
       r = { found: false, path: null, file: cmd, prefixArgs: [], shell: true, how: 'missing' };
@@ -87,6 +123,7 @@ export async function resolveCommand(cmd) {
       r = { found: true, path: hit, file: hit, prefixArgs: [], shell: false, how: 'exe' };
     }
   }
+  if (outsidePath && r.found) r = { ...r, how: `${r.how} · PATH 밖 기본 설치 위치에서 찾음` };
   cache.set(cmd, r);
   return r;
 }
