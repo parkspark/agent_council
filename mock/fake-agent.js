@@ -7,6 +7,8 @@
 //   COUNCIL_MOCK_FAIL=codex      해당 에이전트가 로그인 오류로 실패하는 상황을 흉내
 //   COUNCIL_MOCK_PERMFAIL=antigravity
 //                                첫 시도에서 "셸 명령 권한 거부 → 답변 없음"을 흉내 (재시도 경로 확인용)
+//   COUNCIL_MOCK_HANG=antigravity
+//                                최종 답변(result)을 보낸 뒤 프로세스가 끝나지 않고 멈춘 상황을 흉내 (실제 agy에서 관찰됨)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -228,6 +230,10 @@ async function main() {
     }
     out({ event: 'step_update', step_update: { conversation_id: sid, step_index: 3, state: 'DONE', step_type: 'agent_response' } });
     out({ event: 'result', result: { conversation_id: sid, status: 'SUCCESS', response: text, num_turns: 2 } });
+  }
+
+  if ((process.env.COUNCIL_MOCK_HANG || '').split(',').includes(flavor)) {
+    setInterval(() => {}, 60000); // 답변은 다 보냈지만 종료하지 않음
   }
 }
 

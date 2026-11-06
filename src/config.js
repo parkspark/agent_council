@@ -19,7 +19,10 @@ export const DEFAULT_CONFIG = {
   consensusRetries: 1,
   // 리뷰에서 수정 요청이 나왔을 때 고치는 횟수
   maxFixRounds: 1,
-  timeouts: { discussMinutes: 15, executeMinutes: 40 },
+  // discussMinutes / executeMinutes: 호출당 전체 제한 시간
+  // idleMinutes: 이 시간 동안 출력이 전혀 없으면 멈춘 것으로 보고 중단 (0이면 끔)
+  // graceSeconds: 최종 답변을 받은 뒤 프로세스가 스스로 끝나기를 기다리는 시간. 지나면 정리하고 넘어감
+  timeouts: { discussMinutes: 15, executeMinutes: 40, idleMinutes: 10, graceSeconds: 5 },
   // 다른 에이전트 의견을 프롬프트에 넣을 때 에이전트당 최대 글자 수
   maxOpinionChars: 8000,
   maxDiffChars: 40000,

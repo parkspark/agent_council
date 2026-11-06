@@ -39,6 +39,7 @@ export default {
     let sessionId = null;
     let lastMessage = '';
     let error = null;
+    let done = false;
     const plain = [];
 
     return {
@@ -84,7 +85,10 @@ export default {
           } else if (!done && ty) {
             ev.push({ kind: 'tool', text: toolLabel(ty, it) });
           }
+        } else if (t === 'turn.completed') {
+          done = true;
         } else if (t === 'turn.failed') {
+          done = true;
           error = o.error?.message || 'turn failed';
           ev.push({ kind: 'error', text: error });
         } else if (t === 'error') {
@@ -100,9 +104,14 @@ export default {
             ev.push({ kind: 'text', text: m.message });
           } else if (m.type === 'exec_command_begin') {
             ev.push({ kind: 'tool', text: `$ ${clip([].concat(m.command || []).join(' '), 140)}` });
-          } else if (m.type === 'error') error = m.message || 'error';
+          } else if (m.type === 'task_complete') done = true;
+          else if (m.type === 'error') error = m.message || 'error';
         }
         return ev;
+      },
+      /** 턴이 끝났는지 (exec 모드는 턴 하나로 끝나므로 이 뒤에는 출력이 없습니다) */
+      isDone() {
+        return done;
       },
       result() {
         return { text: lastMessage || plain.join('\n'), sessionId, costUsd: null, error };

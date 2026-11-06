@@ -165,6 +165,16 @@ function killTree(child) {
 /**
  * 프로세스를 실행하고 stdout을 줄 단위로 콜백합니다.
  * 절대 throw하지 않고 결과 객체를 돌려줍니다.
+ *
+ * CLI가 답을 다 내놓고도 끝나지 않는 경우를 막기 위해, 'close'만 기다리지 않고 다음도 봅니다.
+ *   - isDone()      : 줄을 받을 때마다 확인합니다. true가 된 뒤 graceMs 안에 안 끝나면 프로세스를 정리하고 끝냅니다.
+ *   - 'exit' 이후   : 프로세스는 끝났는데 하위 프로세스가 출력 파이프를 붙잡고 있어 'close'가 안 오면,
+ *                     마지막 출력 뒤 graceMs가 지나면 끝냅니다.
+ *   - idleTimeoutMs : stdout·stderr에 이 시간 동안 아무 출력이 없으면 중단합니다. (0이면 끔)
+ *   - timeoutMs     : 전체 제한 시간. (0이면 끔)
+ * 강제로 종료한 뒤에도 killWaitMs 안에 'close'가 오지 않으면 우리 쪽 파이프를 닫고 끝냅니다(무한 대기 방지).
+ *
+ * 결과의 doneMs / exitMs / killMs / durationMs 는 시작 시점부터의 밀리초입니다(해당 사건이 없으면 null).
  */
 export function runProcess({
   resolved,
@@ -173,12 +183,17 @@ export function runProcess({
   input = null,
   env = process.env,
   timeoutMs = 0,
+  idleTimeoutMs = 0,
+  isDone,
+  graceMs = 5000,
+  killWaitMs = 5000,
   signal,
   onLine,
   onStderr,
   maxBuffer = 16 * 1024 * 1024,
 }) {
   return new Promise((resolve) => {
+    const t0 = Date.now();
     const fullArgs = [...(resolved.prefixArgs || []), ...args];
     const spawnOpts = { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], detached: !IS_WIN };
     let child;
@@ -190,7 +205,11 @@ export function runProcess({
         child = spawn(resolved.file, fullArgs, spawnOpts);
       }
     } catch (e) {
-      resolve({ code: -1, signal: null, stdout: '', stderr: String(e.message), timedOut: false, aborted: false, error: e });
+      resolve({
+        code: -1, signal: null, stdout: '', stderr: String(e.message), error: e,
+        timedOut: false, idleTimedOut: false, aborted: false, killedAfterDone: false, forcedClose: false,
+        doneMs: null, exitMs: null, killMs: null, durationMs: Date.now() - t0,
+      });
       return;
     }
 
@@ -198,32 +217,114 @@ export function runProcess({
     let stderr = '';
     let buf = '';
     let settled = false;
+    let terminating = false;
     let timedOut = false;
+    let idleTimedOut = false;
     let aborted = false;
-    let timer = null;
+    let killedAfterDone = false; // 완료 신호를 받은 뒤에도 안 끝나서 정리함
+    let forcedClose = false; // 'close'를 기다리지 않고 파이프를 닫고 끝냄
+    let doneMs = null;
+    let exitMs = null;
+    let killMs = null; // 우리가 종료시킨 시점
+    let exitCode = null;
+    let exitSignal = null;
+    const timers = {};
+
+    const setTimer = (name, ms, fn) => {
+      clearTimeout(timers[name]);
+      timers[name] = setTimeout(fn, ms);
+    };
+
+    const finish = (extra = {}) => {
+      if (settled) return;
+      settled = true;
+      for (const t of Object.values(timers)) clearTimeout(t);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      resolve({
+        stdout, stderr, code: exitCode, signal: exitSignal,
+        timedOut, idleTimedOut, aborted, killedAfterDone, forcedClose,
+        doneMs, exitMs, killMs, durationMs: Date.now() - t0,
+        ...extra,
+      });
+    };
 
     const emitLine = (line) => {
       if (!line.trim() || !onLine) return;
       try { onLine(line); } catch { /* 콜백 오류는 무시 */ }
     };
 
-    const finish = (extra) => {
+    const flushBuf = () => {
+      if (!buf) return;
+      const line = buf.replace(/\r$/, '');
+      buf = '';
+      emitLine(line);
+      checkDone();
+    };
+
+    // 'close'를 기다리지 않고 끝냅니다. 우리 쪽 파이프를 닫아 이벤트 루프가 붙잡히지 않게 합니다.
+    const forceFinish = () => {
       if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (signal) signal.removeEventListener('abort', onAbort);
-      resolve({ stdout, stderr, timedOut, aborted, ...extra });
+      forcedClose = true;
+      flushBuf();
+      for (const s of [child.stdout, child.stderr]) {
+        try { s.destroy(); } catch { /* 이미 닫힘 */ }
+      }
+      finish();
+    };
+
+    // 프로세스 트리를 종료하고, 그래도 'close'가 안 오면 killWaitMs 뒤 끝냅니다.
+    const terminate = () => {
+      if (terminating || settled) return;
+      terminating = true;
+      killMs = Date.now() - t0;
+      clearTimeout(timers.idle);
+      killTree(child);
+      setTimer('killWait', killWaitMs, forceFinish);
+    };
+
+    function checkDone() {
+      if (doneMs !== null || !isDone || settled) return;
+      let d = false;
+      try { d = !!isDone(); } catch { /* 판단 실패는 무시 */ }
+      if (!d) return;
+      doneMs = Date.now() - t0;
+      clearTimeout(timers.idle);
+      setTimer('done', graceMs, () => {
+        if (settled || terminating) return;
+        killedAfterDone = true;
+        if (exitMs !== null) forceFinish(); // 프로세스는 이미 끝났고 파이프만 남은 경우
+        else terminate();
+      });
+    }
+
+    const bumpIdle = () => {
+      if (!idleTimeoutMs || settled || terminating || doneMs !== null || exitMs !== null) return;
+      setTimer('idle', idleTimeoutMs, () => {
+        if (settled || terminating) return;
+        idleTimedOut = true;
+        terminate();
+      });
+    };
+
+    // 'exit' 뒤에도 출력이 이어지는 동안은 기다리고, 마지막 출력 뒤 graceMs가 지나면 끝냅니다.
+    const armExitGrace = () => setTimer('exit', graceMs, forceFinish);
+
+    const onActivity = () => {
+      bumpIdle();
+      if (exitMs !== null) armExitGrace();
     };
 
     function onAbort() {
       aborted = true;
-      killTree(child);
+      terminate();
     }
 
     child.on('error', (e) => finish({ code: -1, signal: null, error: e, stderr: stderr + String(e.message) }));
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
+      if (settled) return;
+      onActivity();
       if (stdout.length < maxBuffer) stdout += chunk;
       buf += chunk;
       let i;
@@ -231,18 +332,31 @@ export function runProcess({
         const line = buf.slice(0, i).replace(/\r$/, '');
         buf = buf.slice(i + 1);
         emitLine(line);
+        checkDone();
       }
     });
     child.stderr.on('data', (chunk) => {
+      if (settled) return;
+      onActivity();
       if (stderr.length < 256 * 1024) stderr += chunk;
       if (onStderr) {
         try { onStderr(chunk); } catch { /* 무시 */ }
       }
     });
+    child.on('exit', (code, sig) => {
+      exitMs = Date.now() - t0;
+      exitCode = code;
+      exitSignal = sig;
+      clearTimeout(timers.idle);
+      if (!settled) armExitGrace();
+    });
     child.on('close', (code, sig) => {
-      if (buf) emitLine(buf.replace(/\r$/, ''));
-      buf = '';
-      finish({ code, signal: sig });
+      flushBuf();
+      if (exitMs === null) {
+        exitCode = code;
+        exitSignal = sig;
+      }
+      finish();
     });
 
     child.stdin.on('error', () => { /* 프로세스가 stdin을 읽기 전에 끝난 경우(EPIPE) */ });
@@ -250,11 +364,13 @@ export function runProcess({
     else child.stdin.end();
 
     if (timeoutMs > 0) {
-      timer = setTimeout(() => {
+      setTimer('total', timeoutMs, () => {
+        if (settled || terminating) return;
         timedOut = true;
-        killTree(child);
-      }, timeoutMs);
+        terminate();
+      });
     }
+    bumpIdle();
     if (signal) {
       if (signal.aborted) onAbort();
       else signal.addEventListener('abort', onAbort, { once: true });

@@ -43,6 +43,24 @@ function lastLines(s, n = 6) {
   return String(s || '').trim().split(/\r?\n/).slice(-n).join('\n');
 }
 
+/** raw 로그 끝에 남기는 종료 요약. 나중에 "답은 끝났는데 프로세스가 안 끝난" 경우를 구분하는 데 씁니다. */
+export function describeExit(res) {
+  const sec = (ms) => `${(ms / 1000).toFixed(1)}s`;
+  const parts = [`종료 code=${res.code ?? '-'}${res.signal ? ` signal=${res.signal}` : ''}`, `총 ${sec(res.durationMs ?? 0)}`];
+  if (res.doneMs != null) parts.push(`최종 답변 수신 ${sec(res.doneMs)}`);
+  parts.push(res.exitMs != null ? `프로세스 종료 ${sec(res.exitMs)}` : '프로세스 종료 이벤트 없음');
+  if (res.aborted) parts.push('취소');
+  if (res.timedOut) parts.push('전체 시간 초과로 종료시킴');
+  if (res.idleTimedOut) parts.push('무응답 시간 초과로 종료시킴');
+  if (res.killedAfterDone) {
+    parts.push(res.killMs != null
+      ? `답변 후에도 프로세스가 끝나지 않아 ${sec(res.killMs)}에 종료시킴`
+      : '답변 후 프로세스는 끝났지만 출력 파이프가 열려 있었음');
+  }
+  if (res.forcedClose) parts.push('출력 파이프가 닫히지 않아 강제로 닫음');
+  return parts.join(' · ');
+}
+
 export function agentInfo(id) {
   const a = ADAPTERS[id];
   return { id, name: a.name, short: a.short, color: a.color };
@@ -190,8 +208,12 @@ export class Council extends EventEmitter {
     const ac = this.agentCfg(id);
     const inputMode = ac.inputMode || ad.defaultInputMode;
     const perm = this.permFor(access);
+    const tc = this.config.timeouts || {};
     const timeoutMin = timeoutMinutes
-      ?? (access === 'read' ? this.config.timeouts.discussMinutes : this.config.timeouts.executeMinutes);
+      ?? (access === 'read' ? tc.discussMinutes : tc.executeMinutes);
+    const idleMin = Number(tc.idleMinutes) > 0 ? Number(tc.idleMinutes) : 0; // 0 또는 미지정이면 끔
+    const g = Number(tc.graceSeconds ?? 5);
+    const graceSec = Number.isFinite(g) && g >= 0 ? g : 5;
     const permArgs = ac.permissionArgs?.[perm] ?? ad.PERMISSIONS[perm];
     const args = ad.buildArgs({
       inputMode,
@@ -226,6 +248,10 @@ export class Council extends EventEmitter {
       input: ad.formatInput(prompt, inputMode),
       env: childEnv(),
       timeoutMs: timeoutMin * 60000,
+      idleTimeoutMs: idleMin * 60000,
+      // 최종 답변(result)을 받으면 graceSec 안에 안 끝나도 프로세스를 정리하고 넘어갑니다.
+      isDone: () => parser.isDone?.() ?? false,
+      graceMs: graceSec * 1000,
       signal: this.ac.signal,
       onLine: (line) => {
         raw.write(line + '\n');
@@ -239,18 +265,30 @@ export class Council extends EventEmitter {
       },
       onStderr: (chunk) => raw.write(`[stderr] ${chunk}`),
     });
+    raw.write(`# ${describeExit(res)}\n`);
     raw.end();
 
     const out = parser.result();
     const text = String(out.text || '').trim();
+    // 최종 답변까지 받았다면, 그 뒤에 프로세스가 멈춰 시간 초과가 나도 답변은 그대로 씁니다.
+    const completed = (parser.isDone?.() ?? false) && !!text;
     let error = null;
     if (res.aborted) error = '취소됨';
-    else if (res.timedOut) error = `시간 초과 (${timeoutMin}분)`;
-    else if (!text) {
+    else if ((res.timedOut || res.idleTimedOut) && !completed) {
+      error = res.idleTimedOut ? `응답 없음 (${idleMin}분 동안 출력 없음)` : `시간 초과 (${timeoutMin}분)`;
+    } else if (!text) {
       error = out.error || lastLines(res.stderr) || `종료 코드 ${res.code}`;
       if (res.error?.code === 'ENOENT') error = `'${ac.command}' 명령을 실행할 수 없습니다 (설치/PATH 확인)`;
     }
     const ok = !error;
+    let warning = null;
+    if (ok && (res.timedOut || res.idleTimedOut)) {
+      warning = '최종 답변을 받은 뒤 프로세스가 끝나지 않아 제한 시간에 종료했습니다. 받은 답변을 사용합니다.';
+    } else if (ok && res.killedAfterDone) {
+      warning = `최종 답변을 받은 뒤 ${graceSec}초 안에 프로세스가 끝나지 않아 정리했습니다. 받은 답변을 사용합니다.`;
+    } else if (ok && ((res.code != null && res.code !== 0) || out.error)) {
+      warning = clip(out.error || `종료 코드 ${res.code}`, 300);
+    }
     const result = {
       agent: id,
       phase,
@@ -261,7 +299,7 @@ export class Council extends EventEmitter {
       text: ok ? text : '',
       json: ok ? extractJson(text) : null,
       error,
-      warning: ok && (res.code !== 0 || out.error) ? clip(out.error || `종료 코드 ${res.code}`, 300) : null,
+      warning,
       durationMs: Date.now() - t0,
       costUsd: out.costUsd ?? null,
       sessionId: out.sessionId ?? null,

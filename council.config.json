@@ -6,7 +6,7 @@
   "permission": "edits",
   "consensusRetries": 1,
   "maxFixRounds": 1,
-  "timeouts": { "discussMinutes": 15, "executeMinutes": 40 },
+  "timeouts": { "discussMinutes": 15, "executeMinutes": 40, "idleMinutes": 10, "graceSeconds": 5 },
   "maxOpinionChars": 8000,
   "maxDiffChars": 40000,
   "port": 4545,

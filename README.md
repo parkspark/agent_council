@@ -93,7 +93,9 @@ node bin\council.js --help
 | `permission` | `"edits"` | 실행 단계 권한. `edits` = 파일 편집만 자동 승인, `full` = 명령 실행까지 모두 허용 |
 | `consensusRetries` | 1 | 합의 실패 시 합의안을 다시 쓰는 횟수 |
 | `maxFixRounds` | 1 | 리뷰 지적을 반영하는 횟수 |
-| `timeouts` | 15분 / 40분 | 토론 단계 / 실행 단계 호출당 제한 시간 |
+| `timeouts.discussMinutes` / `executeMinutes` | 15분 / 40분 | 토론 단계 / 실행 단계 호출당 전체 제한 시간 |
+| `timeouts.idleMinutes` | 10분 | 이 시간 동안 출력이 전혀 없으면 멈춘 것으로 보고 중단. `0`이면 끔 |
+| `timeouts.graceSeconds` | 5초 | 최종 답변을 받은 뒤 CLI가 스스로 끝나기를 기다리는 시간. 지나면 프로세스를 정리하고 받은 답변으로 진행 |
 | `defaultCwd` | `null` | 대시보드에 미리 채울 작업 폴더 |
 | `agents.<id>.command` | `claude` / `codex` / `agy` | 실행 파일 이름 또는 전체 경로 |
 | `agents.<id>.model` | `null` | 모델 지정 (각 CLI의 `--model` / `-m`로 전달) |
@@ -157,7 +159,10 @@ node bin\council.js --help
 - **Antigravity 응답이 비어 있음 (다른 이유)**: CLI 버전에 따라 stdin 입력 방식이 다를 수 있습니다. `"antigravity": { "inputMode": "arg" }`로 바꿔 보세요(프롬프트를 `-p` 인자로 넘김).
 - **Codex가 Windows에서 샌드박스 오류**: `"codex": { "permissionArgs": { "read": [], "edits": ["--full-auto"] } }`처럼 조정하거나 WSL에서 실행하세요.
 - **실행 단계에서 테스트를 못 돌림**: 기본 `permission: "edits"`는 파일 편집만 허용합니다. 명령 실행까지 맡기려면 `"permission": "full"`로 바꾸세요(신뢰하는 프로젝트에서만).
-- **시간 초과**: `timeouts.discussMinutes`, `timeouts.executeMinutes`를 늘리세요.
+- **시간 초과**: 먼저 `runs/<id>/raw/*.out.jsonl` 마지막 줄의 `# 종료 ...` 요약을 확인하세요.
+  - `최종 답변 수신 60.0s`처럼 답변을 받은 기록이 있으면 CLI가 답을 끝내고도 종료하지 않은 경우입니다. agy에서 자주 생기며, 이제는 `graceSeconds` 뒤에 자동으로 정리하고 받은 답변을 씁니다.
+  - 답변 수신 기록 없이 `무응답 시간 초과`라면 CLI가 멈춘 것입니다. 정말 오래 걸리는 작업(긴 테스트 등)이라면 `timeouts.idleMinutes`를 늘리세요.
+  - 출력은 계속 나오는데 `전체 시간 초과`라면 `timeouts.discussMinutes`, `timeouts.executeMinutes`를 늘리세요.
 
 ## 구조
 

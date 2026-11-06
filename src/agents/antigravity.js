@@ -98,8 +98,10 @@ export default {
     const steps = new Map(); // step_index → 누적 텍스트
     const announced = new Set();
     const plain = [];
+    let done = false;
 
     const handleResult = (r) => {
+      done = true;
       sessionId = r.conversation_id || sessionId;
       if (typeof r.response === 'string') finalText = r.response;
       const denied = Array.isArray(r.denied_actions) ? r.denied_actions : [];
@@ -140,7 +142,9 @@ export default {
               }
             }
             if (s.state === 'ERROR') {
-              ev.push({ kind: 'error', text: `${s.tool_name || s.tool_info?.name || '도구'} 실패 (권한 거부일 수 있음)` });
+              const name = s.tool_name || s.tool_info?.name || '도구';
+              const msg = s.tool_info?.error?.message || s.error?.message;
+              ev.push({ kind: 'error', text: msg ? `${name} 실패 · ${clip(msg, 160)}` : `${name} 실패` });
             }
           }
         } else if (o.event === 'result') {
@@ -152,6 +156,13 @@ export default {
           ev.push({ kind: 'error', text: clip(error, 200) });
         }
         return ev;
+      },
+      /**
+       * 최종 result 이벤트를 받았는지. agy는 답변을 다 보낸 뒤에도 프로세스가 끝나지 않고
+       * 멈춰 있을 때가 있어서(실측: result 후 14분 대기), 러너가 이 신호를 보고 프로세스를 정리합니다.
+       */
+      isDone() {
+        return done;
       },
       result() {
         return {

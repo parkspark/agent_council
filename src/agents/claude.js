@@ -56,6 +56,7 @@ export default {
     let lastText = '';
     let error = null;
     let costUsd = null;
+    let done = false;
     const plain = [];
 
     return {
@@ -81,6 +82,7 @@ export default {
             }
           }
         } else if (o.type === 'result') {
+          done = true;
           sessionId = o.session_id || sessionId;
           if (typeof o.result === 'string') finalText = o.result;
           if (typeof o.total_cost_usd === 'number') costUsd = o.total_cost_usd;
@@ -90,6 +92,10 @@ export default {
           }
         }
         return ev;
+      },
+      /** 최종 result 줄을 받았는지 (받은 뒤 프로세스가 안 끝나면 러너가 정리합니다) */
+      isDone() {
+        return done;
       },
       result() {
         return {
